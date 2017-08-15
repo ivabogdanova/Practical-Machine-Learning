@@ -1,0 +1,170 @@
+---
+title: "Practical Machine Learning project"
+author: "Iva Bogdanova"
+date: "8/14/2017"
+output: html_document
+---
+```{r}
+library(knitr)
+```
+
+
+## Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+In this project, the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. We are interested in predicting the manner in which the participants did the exercise. 
+
+## Getting and Loading Data
+
+```{r message = FALSE, warning = FALSE}
+library(caret)
+library(rattle)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+```
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+Loading the data and partitioning the training set in two parts
+
+```{r}
+set.seed(12345)
+trainURL <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testURL <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+training <- read.csv(url(trainURL), na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv(url(testURL), na.strings=c("NA","#DIV/0!",""))
+
+inTrain <- createDataPartition(training$classe, p=0.6, list=FALSE)
+myTraining <- training[inTrain, ]
+myTesting <- training[-inTrain, ]
+```
+
+
+## Data Cleaning
+
+NearZeroValues must be taken out, as well as the columns that are not relevant to accelerometer measurements (first column of myTraining), together with all variables with more than 60% NA. The cleaned data is kept under the same variable name.
+
+```{r}
+nzv <- nearZeroVar(myTraining, saveMetrics=TRUE)
+myTraining <- myTraining[,nzv$nzv==FALSE]
+
+nzv<- nearZeroVar(myTesting,saveMetrics=TRUE)
+myTesting <- myTesting[,nzv$nzv==FALSE]
+
+myTraining <- myTraining[c(-1)]
+
+trainingV3 <- myTraining
+for(i in 1:length(myTraining)) {
+    if( sum( is.na( myTraining[, i] ) ) /nrow(myTraining) >= .7) {
+        for(j in 1:length(trainingV3)) {
+            if( length( grep(names(myTraining[i]), names(trainingV3)[j]) ) == 1)  {
+                trainingV3 <- trainingV3[ , -j]
+            }   
+        } 
+    }
+}
+myTraining <- trainingV3
+rm(trainingV3)
+```
+
+As a pre-processing of  myTesting set, first, we remove the classe column, then we allow only variables in myTesting that are in myTraining set. Finaly, we also need to allow only variables in testing that are in myTraining set. 
+
+```{r}
+clean1 <- colnames(myTraining)
+clean2 <- colnames(myTraining[, -58])
+myTesting <- myTesting[clean1]   
+testing <- testing[clean2]
+
+for (i in 1:length(testing) ) {
+    for(j in 1:length(myTraining)) {
+        if( length( grep(names(myTraining[i]), names(testing)[j]) ) == 1)  {
+            class(testing[j]) <- class(myTraining[i])
+        }      
+    }      
+}
+
+testing <- rbind(myTraining[2, -58] , testing)
+testing <- testing[-1,]
+```
+
+## Prediction with Decision Trees
+
+Let us start with creating the decision tree on myTraining, computing the accuracy in this case and plotting the results:
+
+```{r}
+set.seed(12345)
+modFitA1 <- rpart(classe ~ ., data=myTraining, method="class")
+fancyRpartPlot(modFitA1)
+```
+
+```{r}
+predictionsA1 <- predict(modFitA1, myTesting, type = "class")
+cmtree <- confusionMatrix(predictionsA1, myTesting$classe)
+cmtree
+```
+
+```{r}
+plot(cmtree$table, col = cmtree$byClass, main = paste("Decision Tree: Accuracy =", round(cmtree$overall['Accuracy'], 4)))
+```
+
+
+## Random Forest
+Let us run the random forest as a prediction method on test data:
+```{r message=FALSE, warning=FALSE}
+library(randomForest)
+```
+
+
+```{r}
+set.seed(12345)
+modFitB1 <- randomForest(classe ~ ., data=myTraining)
+predictionB1 <- predict(modFitB1, myTesting, type = "class")
+cmrf <- confusionMatrix(predictionB1, myTesting$classe)
+cmrf
+```
+
+```{r}
+plot(modFitB1)
+```
+
+## Generalized Boosted Regression
+Finaly, we'll fit a predictive model using generalized boosted regression. We will also use 5-fold cross validation when applying the algorithm.
+```{r warning=FALSE, message=FALSE}
+set.seed(12345)
+fitControl <- trainControl(method = "repeatedcv",
+                           number = 5,
+                           repeats = 1)
+
+gbmFit1 <- train(classe ~ ., data=myTraining, method = "gbm",
+                 trControl = fitControl,
+                 verbose = FALSE)
+```
+
+```{r}
+gbmFinMod1 <- gbmFit1$finalModel
+
+gbmPredTest <- predict(gbmFit1, newdata=myTesting)
+gbmAccuracyTest <- confusionMatrix(gbmPredTest, myTesting$classe)
+gbmAccuracyTest
+```
+
+## Results and Conclusions
+
+Considering the three methods we used in our study, the highest accuracy is obtained with the random forest: 99.89%. In this case, the expected out-of-sample case is 0.11%. We use the random forest method for prediction on the test data.
+
+```{r}
+predictionB2 <- predict(modFitB1, testing, type = "class")
+predictionB2
+```
+
