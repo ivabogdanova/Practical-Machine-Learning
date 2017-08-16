@@ -1,2 +1,2 @@
-# Practical Machine Learning
-This repo contains the Practical MAchine Learning project assignment
+---
+This repo contains files for the PML project:
